@@ -1,113 +1,76 @@
-#@title main.py
+# /content/app.py
+
 import gradio as gr
-from diffusers import EulerDiscreteScheduler, EulerAncestralDiscreteScheduler, LMSDiscreteScheduler, DPMSolverSinglestepScheduler, KDPM2DiscreteScheduler, DPMSolverMultistepScheduler
-from modules.txt2img import load_diffusion_pipeline, generate_images
+import numpy as np
+from PIL import Image
+from diffusers import DiffusionPipeline
+import torch
+from modules import txt2img
+from modules.txt2img import txt2img
+from modules import pipeline
+from modules.pipeline import load_pipeline_global
 from modules import style
 from modules.style import css
-scheduler_choices = {
-    "Euler": EulerDiscreteScheduler.from_config,
-    "Euler a": EulerAncestralDiscreteScheduler.from_config,
-    "LMS": LMSDiscreteScheduler.from_config,
-    "DPM++ 2M": DPMSolverMultistepScheduler.from_config,
-    "DPM++ SDE": DPMSolverSinglestepScheduler.from_config,
-    "LMS Karras": lambda config, use_karras_sigmas=True: LMSDiscreteScheduler.from_config(config, use_karras_sigmas=use_karras_sigmas),
-    "DPM2 Karras": lambda config, use_karras_sigmas=True: KDPM2DiscreteScheduler.from_config(config, use_karras_sigmas=use_karras_sigmas),
-    "DPM++ 2M Karras": lambda config, use_karras_sigmas=True: DPMSolverMultistepScheduler.from_config(config, use_karras_sigmas=use_karras_sigmas),
-    "DPM++ SDE Karras": lambda config, use_karras_sigmas=True: DPMSolverSinglestepScheduler.from_config(config, use_karras_sigmas=use_karras_sigmas),
-    "DPM++ 2M SDE": lambda config, use_karras_sigmas=False: DPMSolverMultistepScheduler.from_config(config, use_karras_sigmas=use_karras_sigmas, algorithm_type='sde-dpmsolver++'),
-    "DPM++ 2M SDE Karras": lambda config, use_karras_sigmas=True: DPMSolverMultistepScheduler.from_config(config, use_karras_sigmas=use_karras_sigmas, algorithm_type='sde-dpmsolver++'),
-}
-
-modelnames = [
-    ("digiplay/Realisian_v5", "digiplay/Realisian_v5"),
-    ("SG161222/Realistic_Vision_V6.0_B1_noVAE", "SG161222/Realistic_Vision_V6.0_B1_noVAE"),
-    ("segmind/SSD-1B", "segmind/SSD-1B"),
-    ("digiplay/RealEpicMajicRevolution_v1", "digiplay/RealEpicMajicRevolution_v1"),
-    ("imagepipeline/Realities-Edge-XL", "imagepipeline/Realities-Edge-XL"),
-    ("stablediffusionapi/realisian111", "stablediffusionapi/realisian111")
-]
-
-pipeline = None  # Initialize pipeline globally
-
-def load_model(models_id):
-    global pipeline
-    pipeline = load_diffusion_pipeline(models_id)
-    pipeline.safety_checker = None
-
-image_info_textbox = gr.Textbox(label="Image Info")  # Create the Textbox component
-textbox_holder = [image_info_textbox]
-
-def create_callback():
-    def generate_images_callback(prompt_str, neg_prompt_str, height_int, width_int, num_steps_int, guid_scale_float, num_images_int, seed_int, scheduler_choice):
-        global pipeline
-        images, seed, scheduler = generate_images(pipeline, prompt_str, neg_prompt_str, height_int, width_int, num_steps_int, guid_scale_float, num_images_int, seed_int, scheduler_choice)
-        image_data = {
-            "prompt": prompt_str,
-            "negative_prompt": neg_prompt_str,
-            "seed": seed,
-            "scheduler": pipeline.scheduler
-        }
-        image_info_textbox = update_image_info(textbox_holder[0], image_data)  # Access the textbox from the list
-        textbox_holder[0] = image_info_textbox  # Update the textbox in the list
-        return images, textbox_holder[0]  # Return the new Textbox
-    return generate_images_callback
-
-
-def load_model_callback(models_id):
-    load_model(models_id)
-
-def update_image_info(image_info_textbox, image_data):
-    # Convert image_data to string
-    image_data_str = str(image_data)
-    new_textbox = gr.Textbox(value=image_data_str)  # Create a new Textbox
-    return new_textbox
+from modules.scheduler import update_scheduler  # Import update_scheduler from scheduler module
+from modules.scheduler import scheduler_constructors
+from diffusers import (
+    PNDMScheduler,
+    DEISMultistepScheduler,
+    UniPCMultistepScheduler,
+    EulerDiscreteScheduler,
+    EulerAncestralDiscreteScheduler,
+    LMSDiscreteScheduler,
+    KDPM2DiscreteScheduler,
+    KDPM2AncestralDiscreteScheduler,
+    DPMSolverSinglestepScheduler,
+    DPMSolverMultistepScheduler,
+)
 
 
 with gr.Blocks(css=style.css) as demo:
-  gr.Markdown("Stable DeepGen v0.1", elem_classes="version")
-  image_output_block = gr.Gallery(elem_classes="image_out")
-  load_model_button = gr.Button("Load Model", elem_classes="load-button")
-  load_model_button.click(load_model_callback, inputs=[gr.Dropdown(container=False, choices=modelnames, elem_classes="model", value="stablediffusionapi/realisian111")])
-  gr.Markdown("Select Model", elem_classes="model-mark")
-  schedulers = gr.Dropdown(container=False, choices=scheduler_choices, elem_classes="scheduler")
-  gr.Markdown("Scheduler", elem_classes="scheduler-mark")
-  styles = gr.CheckboxGroup(container=False, label="Styles", choices=["Anime", "3d", "Realistic"], elem_classes="style")
-  gr.Markdown("Styles", elem_classes="style-mark")
-  image_info_textbox = gr.Textbox(placeholder="Output Details", container=False, lines=9, elem_classes="details")
+  gr.Markdown("Stable Diffusion Checkpoint", elem_classes="stable-diff")
+  with gr.Row():
+    model_global = gr.Textbox(elem_classes="model", container=False, value="SG161222/Realistic_Vision_V6.0_B1_noVAE")
+    load_model_global = gr.Button(value="Load", elem_classes="load-model")
   with gr.Tab("Txt2Img", elem_classes="tab"):
     with gr.Row():
       with gr.Column():
-        prompt_str = gr.Textbox(placeholder="Prompt", container=False, lines=3, elem_classes="prompt")
-        neg_prompt_str = gr.Textbox(placeholder="Negative Prompt", container=False, lines=3, elem_classes="prompt")
+        prompt_t2i = gr.Textbox(elem_classes="prompt", container=False, lines=3, placeholder="Place Promps here....")
+        negative_prompt_t2i = gr.Textbox(elem_classes="negative-prompt", container=False, lines=3, placeholder="Place Negative Promps here....")
       with gr.Column():
-        gr.Markdown("Height", elem_classes="height-mark")
-        height_int = gr.Slider(minimum=408, maximum=1600, step=8, value=408, container=False, elem_classes="height")
-        gr.Markdown("Width", elem_classes="width-mark")
-        width_int = gr.Slider(minimum=408, maximum=1600, step=8, value=408, container=False, elem_classes="width")
-      with gr.Column():
-        num_steps_int = gr.Slider(minimum=1, maximum=100, value=10, step=1, container=False, elem_classes="num_steps")
-        gr.Markdown("Sampling Steps", elem_classes="num-steps-mark")
-        guid_scale_float = gr.Slider(minimum=1, maximum=10, value=5, step=0.1, container=False, elem_classes="guidance")
-        gr.Markdown("CFG Scale", elem_classes="guidance-mark")
-      with gr.Column():
-        num_images_int = gr.Slider(minimum=1, maximum=10, value=1, step=1, container=False, elem_classes="num_images")
-        gr.Markdown("Batch Count", elem_classes="num-images-mark")
+        generate_t2i = gr.Button(value="Generate", elem_classes="generate-t2i")
+    with gr.Tab("Generation", elem_classes="tab2"):
       with gr.Row():
-        seed_inp = gr.Textbox(placeholder="Seed", container=False, elem_classes="seed-inp")
-        generate = gr.Button(elem_classes="generate")
-  with gr.Tab("Img2Img", elem_classes=""):
-    with gr.Row():
-      text = gr.Textbox()
-  with gr.Tab("Txt2Vid", elem_classes=""):
-    with gr.Row():
-      text = gr.Textbox()
-  with gr.Tab("Upscale", elem_classes=""):
-    with gr.Row():
-      text = gr.Textbox()
-  with gr.Tab("Settings", elem_classes="Settings"):
-    with gr.Row():
-      text = gr.Textbox()
-  callback = create_callback()  # Create the callback
-  generate.click(fn=callback, inputs=[prompt_str, neg_prompt_str, height_int, width_int, num_steps_int, guid_scale_float, num_images_int, seed_inp, schedulers], outputs=[image_output_block, image_info_textbox])
+        with gr.Column():
+          gr.Markdown("Sampling Methods", elem_classes="samp-meth-mark")
+          scheduler = gr.Dropdown(elem_classes="samp-meth", choices=list(scheduler_constructors.keys()), value="DPM-SDE-Karras", container=False)
+        with gr.Column():
+          load_scheduler_t2i = gr.Button(value="Load", elem_classes="load-scheduler-t2i")
+        with gr.Column():
+          gr.Markdown("Sampling Steps", elem_classes="samp-steps-mark")
+          num_inference_steps_t2i = gr.Slider(elem_classes="samp-steps", minimum=1, maximum=100, value=10, step=1, container=False)
+        with gr.Column():
+          image_out_t2i = gr.Gallery(elem_classes="image-output-t2i")
+      with gr.Row():
+        with gr.Column():
+          gr.Markdown("Height", elem_classes="height-t2i-mark")
+          height_t2i = gr.Slider(elem_classes="height-t2i", minimum=100, maximum=1600, value=408, step=8, container=False)
+          gr.Markdown("Width", elem_classes="width-t2i-mark")
+          width_t2i = gr.Slider(elem_classes="width-t2i", minimum=100, maximum=1600, value=408, step=8, container=False)
+        with gr.Column():
+          gr.Markdown("Batch Count", elem_classes="batch-count-t2i-mark")
+          batch_count_t2i = gr.Slider(elem_classes="batch-count-t2i", minimum=1, maximum=10, step=1, value=1, container=False)
+          gr.Markdown("Batch Size", elem_classes="batch-size-t2i-mark")
+          batch_size = gr.Slider(elem_classes="batch-size-t2i", minimum=1, maximum=10, value=1, step=1, container=False)
+      with gr.Column():
+        gr.Markdown("CFG Scale", elem_classes="guidance-scale-t2i-mark")
+        guidance_scale_t2i = gr.Slider(elem_classes="guidance-scale-t2i", minimum=0, maximum=10, value=7.5, step=0.1, container=False)
+        gr.Markdown("Seed", elem_classes="seed-input-t2i-mark")
+        seed_input_t2i = gr.Textbox(elem_classes="seed-input-t2i", container=False)
+        metadata_t2i = gr.Textbox(elem_classes="metadata-t2i", container=False, lines=3)
+      load_model_global.click(fn=load_pipeline_global, inputs=[model_global])
+      load_scheduler_t2i.click(fn=update_scheduler, inputs=[scheduler])
+      generate_t2i.click(fn=txt2img, inputs=[prompt_t2i, negative_prompt_t2i, height_t2i, width_t2i, num_inference_steps_t2i, guidance_scale_t2i, batch_count_t2i, seed_input_t2i], outputs=[image_out_t2i, metadata_t2i])
+
 
 demo.launch(share=True, debug=True)
